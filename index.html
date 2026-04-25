@@ -2,8 +2,8 @@
 <html lang="zh-HK">
 <head>
 <meta charset="UTF-8">
-<title>Typhoon Hato 1713 · 氣象災害預警三維可視化 Demo</title>
-<meta name="description" content="A portfolio demo aligned with Stellerus Digital Twin R&D Engineer JD: Cesium-style GIS web visualization, multi-source real-time data integration (simulated WebSocket), wind-speed time-series forecasting, and performance monitoring.">
+<title>Typhoon Hato 1713 · 台风天鸽路径模拟 - 基于Cesium的3D台风轨迹可视化</title>
+<meta name="description" content="A portfolio demo based on Cesium-style GIS web visualization, multi-source real-time data integration (simulated WebSocket), wind-speed time-series forecasting, and performance monitoring.">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   /* ============================================================
@@ -220,8 +220,8 @@
      TOP BAR — project identity & JD keyword hits
      ========================================================= -->
 <div class="topbar">
-  <span class="brand">STELLERUS-DEMO</span>
-  <span class="title">氣象災害預警 · 三維可視化原型</span>
+  <span class="brand">DEMO</span>
+  <span class="title">台风路径模拟</span>
   <span class="meta">Typhoon Hato 1713 · HKO Best Track · 2017-08-20 → 08-24</span>
   <div class="chips">
     <span class="chip hit">Cesium-Style GIS</span>
@@ -336,7 +336,7 @@
  *      - Storm eye: divIcon + animated wind radius (Leaflet L.circle, meters)
  *      - IoT:       divIcon markers + live badge updates (sim WebSocket)
  *
- *   3. Data flow (mirrors Stellerus digital-twin requirement)
+ *   3. Data flow
  *      - Best-track polyline (offline)                         →  historical layer
  *      - Simulated IoT feed (setInterval, drop-in WebSocket)   →  live layer
  *      - Hermite interpolation between 6-h samples             →  continuous eye
@@ -349,7 +349,7 @@
  *
  *   5. Roadmap (next iterations)
  *      - Swap Leaflet → CesiumJS for 3D globe + BIM/point-cloud overlay
- *      - Replace sim WebSocket with real MQTT broker (Stellerus req.)
+ *      - Replace sim WebSocket with real MQTT broker 
  *      - Plug NetCDF via netcdfjs for radar reflectivity raster
  *      - LSTM/ST-GAT model export → ONNX.js for in-browser inference
  * ============================================================ */
