@@ -2,7 +2,7 @@
 
 An interactive, browser-based simulation of Typhoon Hato (2017) built as a portfolio demo. It combines WebGL-based map rendering, simulated real-time IoT sensor feeds, and spatiotemporal wind-speed forecasting into a single-file engineering dashboard.
 
-**Live demo →** `[paste your GitHub Pages URL here]`  
+**Live demo →** `[Typhoon-Hato-Simulation](https://owoitsucks.github.io/Typhoon-Hato-Simulation/)`  
 *(Open in Chrome or Edge. WebGL must be enabled.)*
 
 ---
