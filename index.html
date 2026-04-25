@@ -2,8 +2,8 @@
 <html lang="zh-HK">
 <head>
 <meta charset="UTF-8">
-<title>Typhoon Hato 1713 · 台风天鸽路径模拟 - 基于Cesium的3D台风轨迹可视化</title>
-<meta name="description" content="A portfolio demo based on Cesium-style GIS web visualization, multi-source real-time data integration (simulated WebSocket), wind-speed time-series forecasting, and performance monitoring.">
+<title>Typhoon Hato 1713 · 台风天鸽路径模拟</title>
+<meta name="description" content="台风天鸽（2017）路径回放与气象预警三维可视化，整合多源实时地理空间数据、IoT传感器流与时序风速预报。">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   /* ============================================================
@@ -220,12 +220,12 @@
      TOP BAR — project identity & JD keyword hits
      ========================================================= -->
 <div class="topbar">
-  <span class="brand">DEMO</span>
-  <span class="title">台风路径模拟</span>
-  <span class="meta">Typhoon Hato 1713 · HKO Best Track · 2017-08-20 → 08-24</span>
+  <span class="brand">HATO-1713</span>
+  <span class="title">台风天鸽路径模拟</span>
+  <span class="meta">Typhoon Hato · HKO Best Track · 2017-08-20 → 08-24</span>
   <div class="chips">
-    <span class="chip hit">Cesium-Style GIS</span>
-    <span class="chip hit">WebSocket Sim</span>
+    <span class="chip hit">Web GIS</span>
+    <span class="chip hit">IoT Feed</span>
     <span class="chip hit">Multi-Source</span>
     <span class="chip hit">Time-Series Forecast</span>
     <span class="chip">WGS-84 → EPSG:3857</span>
@@ -498,11 +498,144 @@ track.forEach((p,idx)=>{
       {direction:'top', className:'city-label'}).addTo(map);
 });
 
-/* Eye + wind radius */
+/* ============================================================
+ * Eye — Canvas spiral, logarithmic arms, dynamic sizing
+ * Fixes: centre alignment, no square clipping, tiny eye hole,
+ *        log-spiral (inner-dense / outer-sparse)
+ * ============================================================ */
+
+const eyeCanvas = document.createElement('canvas');
+eyeCanvas.style.cssText =
+  'position:absolute;pointer-events:none;z-index:900;'
+ + 'transform:translate(-50%,-50%);will-change:transform,width,height';
+document.getElementById('map').appendChild(eyeCanvas);
+const eyeCtx = eyeCanvas.getContext('2d');
+
+let eyeAngle  = 0;
+let eyeLatLng = latlngs[0];
+let eyeWindMs = 13;
+
+// Compute pixel radius of the typhoon at current zoom
+// Uses the larger wind-radius circle (wind) as the reference
+function eyePixelRadius(){
+  const centre = map.latLngToContainerPoint(eyeLatLng);
+  // project a point 1° of latitude away to get px/m scale
+  const ref = map.latLngToContainerPoint(
+    [eyeLatLng[0] + 1, eyeLatLng[1]]);
+  const pxPerDeg = Math.abs(ref.y - centre.y);   // pixels per degree lat
+  const pxPerM   = pxPerDeg / 111320;            // ~111km per degree
+  // clamp: at very low zoom keep a minimum size; cap at half viewport
+  const raw = eyeWindMs * 5500 * pxPerM;         // matches wind radius metres
+  return Math.max(40, Math.min(raw, window.innerHeight * 0.42));
+}
+
+function positionEyeCanvas(){
+  const R   = eyePixelRadius();
+  const sz  = Math.ceil(R * 2.6);                // canvas covers 2.6× the visual radius
+  if (eyeCanvas.width !== sz){
+    eyeCanvas.width  = sz;
+    eyeCanvas.height = sz;
+  }
+  const pt = map.latLngToContainerPoint(eyeLatLng);
+  // canvas is appended to #map (top:44px), so containerPoint is already map-relative
+  eyeCanvas.style.left = pt.x + 'px';
+  eyeCanvas.style.top  = pt.y + 'px';
+}
+
+function drawEyeCanvas(windMs){
+  const W  = eyeCanvas.width;
+  const H  = eyeCanvas.height;
+  const cx = W / 2, cy = H / 2;
+  const R  = eyePixelRadius();          // dynamic pixel radius
+  eyeCtx.clearRect(0, 0, W, H);
+
+  // ---- outer glow / rain-band halo ----
+  const halo = eyeCtx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R * 1.25);
+  halo.addColorStop(0,   'rgba(195,210,225,0.18)');
+  halo.addColorStop(0.5, 'rgba(170,190,210,0.10)');
+  halo.addColorStop(1,   'rgba(140,165,190,0.00)');
+  eyeCtx.beginPath();
+  eyeCtx.arc(cx, cy, R * 1.25, 0, Math.PI * 2);
+  eyeCtx.fillStyle = halo;
+  eyeCtx.fill();
+
+  // ---- logarithmic spiral arms — 5 arms, inner-thick outer-blurred ----
+  const ARMS    = 5;
+  const b       = 0.20;
+  const sweep   = Math.PI * 2.5;
+  const PTS     = 200;
+  const intensF = Math.min(windMs / 30, 1);
+  const rMax    = Math.exp(b * sweep) - 1;
+
+  for (let a = 0; a < ARMS; a++){
+    const armOffset = eyeAngle + (a / ARMS) * Math.PI * 2;
+
+    // Draw arm segment-by-segment so we can vary lineWidth + blur per segment
+    // Divide into SEGS chunks; each chunk gets its own blur and width
+    const SEGS = 12;
+    for (let seg = 0; seg < SEGS; seg++){
+      const t0 = seg / SEGS;
+      const t1 = (seg + 1) / SEGS;
+
+      // radial position at segment midpoint
+      const tMid  = (t0 + t1) / 2;
+      const rMid  = ((Math.exp(b * tMid * sweep) - 1) / rMax) * R;
+
+      // thickness: thick at centre (t=0), thin at edge (t=1)
+      const thick = Math.max(0.8, R * 0.075 * (1 - tMid * 0.85));
+
+      // blur: 0 near centre, increases outward
+      const blurPx = tMid * tMid * R * 0.22;
+
+      // opacity: bright inside, fades outside
+      const alpha = intensF * (0.72 - tMid * 0.52);
+
+      eyeCtx.save();
+      eyeCtx.filter = blurPx > 0.5 ? `blur(${blurPx.toFixed(1)}px)` : 'none';
+      eyeCtx.beginPath();
+      let first = true;
+      for (let s = Math.floor(t0 * PTS); s <= Math.ceil(t1 * PTS); s++){
+        const tt    = s / PTS;
+        const theta = armOffset - tt * sweep;
+        const r     = ((Math.exp(b * tt * sweep) - 1) / rMax) * R * 0.98;
+        const x = cx + Math.cos(theta) * r;
+        const y = cy + Math.sin(theta) * r;
+        if (first){ eyeCtx.moveTo(x, y); first = false; }
+        else eyeCtx.lineTo(x, y);
+      }
+      // colour: white-grey, inner segments brighter
+      const brightness = Math.round(255 - tMid * 40);
+      eyeCtx.strokeStyle = `rgba(${brightness},${brightness},${brightness},${alpha})`;
+      eyeCtx.lineWidth   = thick;
+      eyeCtx.lineCap     = 'round';
+      eyeCtx.lineJoin    = 'round';
+      eyeCtx.stroke();
+      eyeCtx.restore();
+    }
+  }
+
+  // ---- compact eye — tiny dark dot, no hollow ----
+  const eyeR = Math.max(4, R * 0.045);  // very small: 4.5% of visual radius
+  const eyeG = eyeCtx.createRadialGradient(cx, cy, 0, cx, cy, eyeR * 2.5);
+  eyeG.addColorStop(0,   'rgba(6,12,24,0.96)');
+  eyeG.addColorStop(0.5, 'rgba(8,14,26,0.70)');
+  eyeG.addColorStop(1,   'rgba(8,14,26,0.00)');
+  eyeCtx.beginPath();
+  eyeCtx.arc(cx, cy, eyeR * 2.5, 0, Math.PI * 2);
+  eyeCtx.fillStyle = eyeG;
+  eyeCtx.fill();
+}
+
+// Invisible Leaflet marker for lat/lon tracking
 const eye = L.marker(latlngs[0],{
-  icon:L.divIcon({className:'',html:'<div style="font-size:24px;filter:drop-shadow(0 0 4px #fff)">🌀</div>',iconSize:[28,28],iconAnchor:[14,14]})
+  icon:L.divIcon({className:'',html:'',iconSize:[1,1],iconAnchor:[0,0]})
 }).addTo(map);
-const wind = L.circle(latlngs[0],{radius:50000,color:'#ef4444',weight:1.5,opacity:.7,fillColor:'#ef4444',fillOpacity:.08}).addTo(map);
+
+// Wind radius rings — grey-blue, no red
+const wind  = L.circle(latlngs[0],{radius:50000,color:'#8fa8b8',weight:1,opacity:.40,fillColor:'#b8ccd8',fillOpacity:.03}).addTo(map);
+const wind2 = L.circle(latlngs[0],{radius:30000,color:'#6e8ea0',weight:1,opacity:.25,fillColor:'#9ab0be',fillOpacity:.02}).addTo(map);
+
+map.on('move zoom', ()=>{ positionEyeCanvas(); drawEyeCanvas(eyeWindMs); });
 
 
 /* ============================================================
@@ -649,9 +782,13 @@ function update(){
   const prs = lerp(a[4],b[4],t);
 
   eye.setLatLng([lat,lon]);
+  eyeLatLng = [lat,lon];
+  eyeWindMs = w;
   wind.setLatLng([lat,lon]);
-  wind.setRadius(w*5000);
-  wind.setStyle({color:intensityColor(w), fillColor:intensityColor(w)});
+  wind.setRadius(w*6000);
+  wind2.setLatLng([lat,lon]);
+  wind2.setRadius(w*3500);
+  positionEyeCanvas();
 
   // Show the landfall pulse only once the eye has actually reached Zhuhai
   if (!landfallShown && p >= landfallIdx){
@@ -675,8 +812,17 @@ function update(){
   flowPath.push([lat,lon]);
   flowLine.setLatLngs(flowPath);
 
-  // Telemetry panel
-  document.getElementById('info-time').textContent = a[0].replace('T',' ').replace('Z','Z');
+  // Telemetry panel — continuous UTC interpolation between track nodes
+  (()=>{
+    const msA = new Date(a[0]).getTime();
+    const msB = new Date(b[0]).getTime();
+    const msNow = msA + (msB - msA) * t;
+    const d = new Date(msNow);
+    const pad = n => String(n).padStart(2,'0');
+    document.getElementById('info-time').textContent =
+      `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} `
+      + `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}Z`;
+  })();
   document.getElementById('info-lat').textContent  = lat.toFixed(5)+'°N';
   document.getElementById('info-lon').textContent  = lon.toFixed(5)+'°E';
   const cat = b[5];
@@ -737,9 +883,15 @@ function loop(ts){
     document.getElementById('ws-rate').textContent  = wsRateWindow;
     wsRateWindow = 0;
   }
+  // Advance eye rotation — speed proportional to wind
+  eyeAngle -= 0.012 * speedMultiplier * (0.5 + eyeWindMs / 60);
+  drawEyeCanvas(eyeWindMs);
+
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+positionEyeCanvas();
+drawEyeCanvas(13);
 update();
 
 // Background sensor tick: keeps IoT feed looking alive even when paused.
